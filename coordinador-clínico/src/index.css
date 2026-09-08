@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  
+  --color-pastel-cream: #FDFBF7;
+  --color-pastel-blue: #B5D8EB;
+  --color-pastel-mint: #B5EAD7;
+  --color-pastel-lavender: #E2D5F8;
+  --color-pastel-pink: #FFDAC1;
+  --color-pastel-yellow: #FFF4CB;
+  --color-pastel-gray: #F3F4F6;
+  
+  --color-text-dark: #374151;
+  --color-text-muted: #6B7280;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-pastel-cream);
+  color: var(--color-text-dark);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
