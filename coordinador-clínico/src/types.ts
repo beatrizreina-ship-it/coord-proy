@@ -3,7 +3,7 @@ export interface Project {
   name: string;
   generalData: string;
   observations: string;
-  color: string;
+  color?: string;
   startDate?: string;
   visitPeriodicities?: string;
 }
@@ -14,6 +14,7 @@ export interface Patient {
   name: string;
   contact: string;
   notes: string;
+  color?: string;
 }
 
 export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly';

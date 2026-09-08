@@ -53,7 +53,7 @@ export default function App() {
     setEditingProject(undefined);
   };
 
-  const handleSaveProject = (projectData: Omit<Project, 'id'> | Project, projectPatients: {id?: string, name: string}[]) => {
+  const handleSaveProject = (projectData: Omit<Project, 'id'> | Project, projectPatients: {id?: string, name: string, color?: string}[]) => {
     let savedProjectId = '';
     if ('id' in projectData) {
       updateProject(projectData as Project);
@@ -178,6 +178,7 @@ export default function App() {
           onDateChange={setCurrentDate}
           appointments={filteredAppointments}
           projects={projects}
+          patients={patients}
           onDayClick={handleDayClick}
           onAppointmentClick={handleAppointmentClick}
         />

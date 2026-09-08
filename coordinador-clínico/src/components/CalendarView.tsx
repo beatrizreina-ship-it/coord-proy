@@ -17,13 +17,14 @@ import {
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Plus, User, Snowflake, HeartPulse, ClipboardList, Calendar as CalendarIcon } from 'lucide-react';
-import { Appointment, Project } from '../types';
+import { Appointment, Project, Patient } from '../types';
 
 interface CalendarViewProps {
   currentDate: Date;
   onDateChange: (date: Date) => void;
   appointments: Appointment[];
   projects: Project[];
+  patients: Patient[];
   onDayClick: (date: Date) => void;
   onAppointmentClick: (appointment: Appointment) => void;
 }
@@ -44,9 +45,12 @@ export function CalendarView({
   onDateChange, 
   appointments, 
   projects,
+  patients,
   onDayClick,
   onAppointmentClick
 }: CalendarViewProps) {
+  
+  const todayRef = React.useRef<HTMLDivElement>(null);
   
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
@@ -57,7 +61,14 @@ export function CalendarView({
 
   const nextMonth = () => onDateChange(addMonths(currentDate, 1));
   const prevMonth = () => onDateChange(subMonths(currentDate, 1));
-  const goToToday = () => onDateChange(new Date());
+  const goToToday = () => {
+    onDateChange(new Date());
+    setTimeout(() => {
+      if (todayRef.current) {
+        todayRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  };
 
   const getExactAppointmentsForDay = (day: Date) => {
     return appointments.filter(app => isSameDay(app.date, day)).sort((a, b) => {
@@ -132,6 +143,7 @@ export function CalendarView({
             return (
               <div 
                 key={day.toString()} 
+                ref={isDayToday ? todayRef : null}
                 onClick={() => onDayClick(day)}
                 className={`
                   p-1 md:p-2 flex flex-col gap-1 relative group cursor-pointer transition-colors rounded-lg shadow-sm border border-[#007B83] hover:bg-[#007B83]/5 overflow-hidden
@@ -151,8 +163,9 @@ export function CalendarView({
                   
                   {/* Flexible Window Render */}
                   {flexibleAppointments.map(app => {
+                    const patient = patients.find(p => p.id === app.patientId);
                     const project = projects.find(p => p.id === app.projectId);
-                    const colorClass = project?.color || 'bg-gray-100';
+                    const colorClass = patient?.color || project?.color || 'bg-gray-100';
                     return (
                       <div 
                         key={`flex-${app.id}`}
@@ -173,8 +186,9 @@ export function CalendarView({
 
                   {/* Exact Day Render */}
                   {exactAppointments.map(app => {
+                    const patient = patients.find(p => p.id === app.patientId);
                     const project = projects.find(p => p.id === app.projectId);
-                    const colorClass = project?.color || 'bg-gray-100';
+                    const colorClass = patient?.color || project?.color || 'bg-gray-100';
                     return (
                       <div 
                         key={app.id}

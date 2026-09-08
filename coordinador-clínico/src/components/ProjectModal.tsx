@@ -4,7 +4,7 @@ import { Project, Patient } from '../types';
 
 interface ProjectModalProps {
   onClose: () => void;
-  onSave: (project: Omit<Project, 'id'> | Project, patients: {id?: string, name: string}[]) => void;
+  onSave: (project: Omit<Project, 'id'> | Project, patients: {id?: string, name: string, color?: string}[]) => void;
   initialData?: Project;
   initialPatients?: Patient[];
 }
@@ -21,12 +21,11 @@ const PASTEL_COLORS = [
 export function ProjectModal({ onClose, onSave, initialData, initialPatients }: ProjectModalProps) {
   const [name, setName] = useState(initialData?.name || '');
   const [observations, setObservations] = useState(initialData?.observations || '');
-  const [color, setColor] = useState(initialData?.color || PASTEL_COLORS[0]);
   const [startDate, setStartDate] = useState(initialData?.startDate || '');
 
   const [numPatients, setNumPatients] = useState<number>(initialPatients?.length || 0);
-  const [patientsList, setPatientsList] = useState<{id?: string, name: string}[]>(
-    initialPatients ? initialPatients.map(p => ({id: p.id, name: p.name})) : []
+  const [patientsList, setPatientsList] = useState<{id?: string, name: string, color?: string}[]>(
+    initialPatients ? initialPatients.map(p => ({id: p.id, name: p.name, color: p.color})) : []
   );
 
   const handleNumPatientsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,7 +33,7 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
     setNumPatients(num);
     setPatientsList(prev => {
       if (num > prev.length) {
-        return [...prev, ...Array(num - prev.length).fill({name: ''})];
+        return [...prev, ...Array(num - prev.length).fill({name: '', color: PASTEL_COLORS[0]})];
       } else if (num < prev.length) {
         return prev.slice(0, num);
       }
@@ -48,6 +47,12 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
     setPatientsList(newList);
   };
 
+  const handlePatientColorChange = (index: number, newColor: string) => {
+    const newList = [...patientsList];
+    newList[index] = { ...newList[index], color: newColor };
+    setPatientsList(newList);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
@@ -57,7 +62,6 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
       name,
       generalData: `${numPatients} Pacientes`,
       observations,
-      color,
       startDate
     };
 
@@ -114,18 +118,30 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
 
           {numPatients > 0 && (
             <div className="bg-[#F9F8F6] p-3 rounded-xl border border-[#EAE7E2]">
-              <label className="text-[10px] uppercase font-bold text-[#999] block mb-2">Nombre de los Pacientes</label>
-              <div className="flex flex-col gap-2">
+              <label className="text-[10px] uppercase font-bold text-[#999] block mb-2">Pacientes y sus Colores</label>
+              <div className="flex flex-col gap-3">
                 {patientsList.map((patient, index) => (
-                  <input
-                    key={index}
-                    type="text"
-                    value={patient.name}
-                    onChange={e => handlePatientNameChange(index, e.target.value)}
-                    className="w-full text-xs p-2 bg-white border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB]"
-                    placeholder={`Nombre del paciente ${index + 1}`}
-                    required
-                  />
+                  <div key={index} className="flex flex-col gap-2 bg-white p-2 border border-gray-200 rounded-md">
+                    <input
+                      type="text"
+                      value={patient.name}
+                      onChange={e => handlePatientNameChange(index, e.target.value)}
+                      className="w-full text-xs p-1 border-b border-gray-100 outline-none focus:border-[#B5D8EB]"
+                      placeholder={`Nombre del paciente ${index + 1}`}
+                      required
+                    />
+                    <div className="flex gap-2 items-center">
+                      <span className="text-[10px] text-gray-400">Color:</span>
+                      {PASTEL_COLORS.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => handlePatientColorChange(index, c)}
+                          className={`w-4 h-4 rounded-full ${c} ${patient.color === c || (!patient.color && c === PASTEL_COLORS[0]) ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -139,20 +155,6 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
               className="w-full text-xs p-2 bg-[#F9F8F6] border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB] min-h-[80px] resize-none"
               placeholder="Notas generales del proyecto..."
             />
-          </div>
-
-          <div>
-            <label className="text-[10px] uppercase font-bold text-[#999] block mb-2">Color del Proyecto</label>
-            <div className="flex gap-3">
-              {PASTEL_COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  className={`w-6 h-6 rounded-full ${c} ${color === c ? 'ring-2 ring-offset-2 ring-gray-400' : ''}`}
-                />
-              ))}
-            </div>
           </div>
 
           <div className="mt-4 flex items-center justify-end">
