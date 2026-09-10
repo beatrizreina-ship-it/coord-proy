@@ -31,6 +31,12 @@ export function AppointmentModal({ onClose, onSave, onDelete, projects, patients
   const [flexibilityDays, setFlexibilityDays] = useState(initialData?.flexibilityDays || 0);
   const [notes, setNotes] = useState(initialData?.notes || '');
 
+  // Preset helper: "cada 15 días"
+  const handleRecurrencePreset15 = () => {
+    setRecurrence('daily');
+    setRecurrenceInterval(15);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !projectId || !date) return;
@@ -181,42 +187,79 @@ export function AppointmentModal({ onClose, onSave, onDelete, projects, patients
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className={recurrence !== 'none' ? 'sm:col-span-1' : 'sm:col-span-3'}>
-                  <label className="text-[10px] uppercase font-bold text-[#999] block mb-1">Periodicidad</label>
-                  <select
-                    value={recurrence}
-                    onChange={e => setRecurrence(e.target.value as RecurrenceType)}
-                    className="w-full text-xs p-2 bg-[#F9F8F6] border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB]"
-                  >
-                    <option value="none">Única</option>
-                    <option value="daily">Días</option>
-                    <option value="weekly">Semanas</option>
-                    <option value="monthly">Meses</option>
-                  </select>
+              <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className={recurrence !== 'none' ? 'sm:col-span-1' : 'sm:col-span-3'}>
+                    <label className="text-[10px] uppercase font-bold text-[#999] block mb-1">Periodicidad</label>
+                    <select
+                      value={recurrence}
+                      onChange={e => setRecurrence(e.target.value as RecurrenceType)}
+                      className="w-full text-xs p-2 bg-[#F9F8F6] border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB]"
+                    >
+                      <option value="none">Única (sin repetición)</option>
+                      <option value="daily">Cada X días</option>
+                      <option value="weekly">Cada X semanas</option>
+                      <option value="monthly">Cada X meses</option>
+                    </select>
+                  </div>
+                  {recurrence !== 'none' && (
+                    <>
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-[#999] block mb-1">Cada (número)</label>
+                        <input 
+                          type="number"
+                          min="1"
+                          value={recurrenceInterval}
+                          onChange={e => setRecurrenceInterval(Number(e.target.value))}
+                          className="w-full text-xs p-2 bg-[#F9F8F6] border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-[#999] block mb-1">Fecha Fin (opcional)</label>
+                        <input 
+                          type="date"
+                          value={recurrenceEndDate}
+                          onChange={e => setRecurrenceEndDate(e.target.value)}
+                          className="w-full text-xs p-2 bg-[#F9F8F6] border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB]"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
+
+                {/* Quick presets */}
+                {recurrence === 'none' && (
+                  <div className="flex gap-2 flex-wrap">
+                    <span className="text-[10px] text-[#999] self-center">Acceso rápido:</span>
+                    <button
+                      type="button"
+                      onClick={handleRecurrencePreset15}
+                      className="text-[10px] px-2 py-1 rounded-full border border-[#B5D8EB] text-[#007B83] hover:bg-[#B5D8EB]/20 transition-colors font-semibold"
+                    >
+                      Cada 15 días
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRecurrence('weekly'); setRecurrenceInterval(1); }}
+                      className="text-[10px] px-2 py-1 rounded-full border border-[#B5D8EB] text-[#007B83] hover:bg-[#B5D8EB]/20 transition-colors font-semibold"
+                    >
+                      Semanal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRecurrence('monthly'); setRecurrenceInterval(1); }}
+                      className="text-[10px] px-2 py-1 rounded-full border border-[#B5D8EB] text-[#007B83] hover:bg-[#B5D8EB]/20 transition-colors font-semibold"
+                    >
+                      Mensual
+                    </button>
+                  </div>
+                )}
+
                 {recurrence !== 'none' && (
-                  <>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-[#999] block mb-1">Cada (X)</label>
-                      <input 
-                        type="number"
-                        min="1"
-                        value={recurrenceInterval}
-                        onChange={e => setRecurrenceInterval(Number(e.target.value))}
-                        className="w-full text-xs p-2 bg-[#F9F8F6] border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-[#999] block mb-1">Fecha Fin</label>
-                      <input 
-                        type="date"
-                        value={recurrenceEndDate}
-                        onChange={e => setRecurrenceEndDate(e.target.value)}
-                        className="w-full text-xs p-2 bg-[#F9F8F6] border border-gray-200 rounded-md outline-none focus:border-[#B5D8EB]"
-                      />
-                    </div>
-                  </>
+                  <p className="text-[10px] text-[#007B83] bg-[#B5D8EB]/10 rounded px-2 py-1">
+                    ✓ Se generarán citas automáticamente cada {recurrenceInterval} {recurrence === 'daily' ? (recurrenceInterval === 1 ? 'día' : 'días') : recurrence === 'weekly' ? (recurrenceInterval === 1 ? 'semana' : 'semanas') : (recurrenceInterval === 1 ? 'mes' : 'meses')}{recurrenceEndDate ? ` hasta el ${recurrenceEndDate}` : ' durante 1 año'}.
+                    {flexibilityDays > 0 && ` Cada fecha incluirá ventana de ±${flexibilityDays} día${flexibilityDays > 1 ? 's' : ''}.`}
+                  </p>
                 )}
               </div>
             </div>

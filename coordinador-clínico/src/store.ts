@@ -175,8 +175,10 @@ export function useClinicalStore() {
     
     newAppointments.push({ ...appointment, id: baseId });
 
-    if (appointment.recurrence !== 'none' && appointment.recurrenceEndDate) {
+    if (appointment.recurrence !== 'none') {
       const interval = appointment.recurrenceInterval || 1;
+      // If no end date is set, default to 1 year from the start date
+      const effectiveEndDate = appointment.recurrenceEndDate ?? addMonths(appointment.date, 12);
       let currentDate = appointment.date;
       let counter = 0;
       const MAX_OCCURRENCES = 365;
@@ -193,14 +195,15 @@ export function useClinicalStore() {
           currentDate = addMonths(currentDate, interval);
         }
 
-        if (isAfter(startOfDay(currentDate), endOfDay(appointment.recurrenceEndDate))) {
+        if (isAfter(startOfDay(currentDate), endOfDay(effectiveEndDate))) {
           break;
         }
 
         newAppointments.push({
           ...appointment,
           id: `${baseId}-${counter}`,
-          date: currentDate
+          date: currentDate,
+          flexibilityDays: appointment.flexibilityDays // ensure flexibility is propagated
         });
       }
     }
