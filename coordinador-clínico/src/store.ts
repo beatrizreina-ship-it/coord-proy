@@ -46,9 +46,13 @@ export function useClinicalStore() {
   }, []);
 
   // Sync with server
+  const isNetworkUpdate = React.useRef(false);
+  const isInitialMount = React.useRef(true);
+
   useEffect(() => {
     const onInitialData = (data: { projects: Project[], patients: Patient[], appointments: any[] }) => {
-      if (data) {
+      if (data && (data.projects?.length > 0 || data.patients?.length > 0 || data.appointments?.length > 0)) {
+        isNetworkUpdate.current = true;
         if (data.projects?.length > 0) setProjects(data.projects);
         if (data.patients?.length > 0) setPatients(data.patients);
         if (data.appointments?.length > 0) setAppointments(parseAppointments(data.appointments));
@@ -57,6 +61,7 @@ export function useClinicalStore() {
 
     const onDataUpdated = (data: { projects: Project[], patients: Patient[], appointments: any[] }) => {
       if (data) {
+        isNetworkUpdate.current = true;
         setProjects(data.projects || []);
         setPatients(data.patients || []);
         setAppointments(parseAppointments(data.appointments || []));
@@ -72,83 +77,57 @@ export function useClinicalStore() {
     };
   }, []);
 
-  // Broadcast and local storage update helper
-  const saveState = useCallback((newProjects: Project[], newPatients: Patient[], newAppointments: Appointment[]) => {
-    localStorage.setItem('clincoord_projects', JSON.stringify(newProjects));
-    localStorage.setItem('clincoord_patients', JSON.stringify(newPatients));
-    localStorage.setItem('clincoord_appointments', JSON.stringify(newAppointments));
-    
-    // Broadcast changes to the server
-    socket.emit('update_data', {
-      projects: newProjects,
-      patients: newPatients,
-      appointments: newAppointments
-    });
-  }, []);
-
-  // Listen to state changes and save (if changed locally)
-  // We use a ref to prevent infinite loops from network updates
-  const isNetworkUpdate = React.useRef(false);
-  
+  // Auto-save to localStorage and emit to server when local state changes
   useEffect(() => {
-    // When socket receives data, it sets state. We don't want to re-emit it.
-    // However, the easiest way to manage this without complex refs in React is to 
-    // let `saveState` be called explicitly inside the mutator functions below.
-    // But since the current app uses `setProjects(prev => ...)` in many places,
-    // we can use a debounced effect to sync state to server after any local change.
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    // Always save to localStorage on any state change
+    localStorage.setItem('clincoord_projects', JSON.stringify(projects));
+    localStorage.setItem('clincoord_patients', JSON.stringify(patients));
+    localStorage.setItem('clincoord_appointments', JSON.stringify(appointments));
+
+    // If the change came from the server, don't emit it back
+    if (isNetworkUpdate.current) {
+      isNetworkUpdate.current = false;
+      return;
+    }
+
+    // Otherwise, broadcast local changes to the server
+    socket.emit('update_data', {
+      projects,
+      patients,
+      appointments
+    });
   }, [projects, patients, appointments]);
-  
-  // We'll wrap state setters to also trigger network sync immediately
-  const handleUpdate = (
-    updateFn: (p: Project[], pt: Patient[], a: Appointment[]) => void
-  ) => {
-    // We snapshot current, apply update, then save. 
-    // To do this functionally with React state is tricky because of closures.
-    // The simplest robust approach is emitting the data whenever the states change, 
-    // BUT we need to avoid echo loops. Since we removed the auto-save useEffects,
-    // we should call saveState inside the mutators.
-  };
 
   const addProject = (project: Omit<Project, 'id'>) => {
     const newProject = { ...project, id: Math.random().toString(36).substr(2, 9) };
-    const nextProjects = [...projects, newProject];
-    setProjects(nextProjects);
-    saveState(nextProjects, patients, appointments);
+    setProjects(prev => [...prev, newProject]);
     return newProject.id;
   };
 
   const updateProject = (updatedProject: Project) => {
-    const nextProjects = projects.map(p => p.id === updatedProject.id ? updatedProject : p);
-    setProjects(nextProjects);
-    saveState(nextProjects, patients, appointments);
+    setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
   };
 
   const deleteProject = (id: string) => {
-    const nextProjects = projects.filter(p => p.id !== id);
-    const nextPatients = patients.filter(p => p.projectId !== id);
-    const nextAppointments = appointments.filter(a => a.projectId !== id);
-    
-    setProjects(nextProjects);
-    setPatients(nextPatients);
-    setAppointments(nextAppointments);
-    saveState(nextProjects, nextPatients, nextAppointments);
+    setProjects(prev => prev.filter(p => p.id !== id));
+    setPatients(prev => prev.filter(p => p.projectId !== id));
+    setAppointments(prev => prev.filter(a => a.projectId !== id));
   };
 
   const addPatient = (patient: Omit<Patient, 'id'>) => {
     const newPatient = { ...patient, id: Math.random().toString(36).substr(2, 9) };
-    const nextPatients = [...patients, newPatient];
-    setPatients(nextPatients);
-    saveState(projects, nextPatients, appointments);
+    setPatients(prev => [...prev, newPatient]);
   };
 
   const deletePatient = (id: string) => {
     if (window.confirm('¿Está seguro de que desea eliminar a este paciente? Esta acción no se puede deshacer.')) {
-      const nextPatients = patients.filter(p => p.id !== id);
-      const nextAppointments = appointments.map(a => a.patientId === id ? { ...a, patientId: undefined } : a);
-      
-      setPatients(nextPatients);
-      setAppointments(nextAppointments);
-      saveState(projects, nextPatients, nextAppointments);
+      setPatients(prev => prev.filter(p => p.id !== id));
+      setAppointments(prev => prev.map(a => a.patientId === id ? { ...a, patientId: undefined } : a));
     }
   };
 
@@ -162,13 +141,7 @@ export function useClinicalStore() {
          }
          return { id: Math.random().toString(36).substr(2, 9), projectId, name: p.name, contact: '', notes: '', color: p.color };
       });
-      const nextPatients = [...otherPatients, ...updatedProjectPatients];
-      
-      // Delay saveState slightly to ensure it captures the current projects and appointments
-      // Alternatively, we use the closure values but they might be stale if multiple updates happen.
-      // For a robust sync we can just sync the entire state when this finishes.
-      setTimeout(() => saveState(projects, nextPatients, appointments), 0);
-      return nextPatients;
+      return [...otherPatients, ...updatedProjectPatients];
     });
   };
 
@@ -208,34 +181,24 @@ export function useClinicalStore() {
       }
     }
     
-    setAppointments(prev => {
-      const nextAppointments = [...prev, ...newAppointments];
-      setTimeout(() => saveState(projects, patients, nextAppointments), 0);
-      return nextAppointments;
-    });
+    setAppointments(prev => [...prev, ...newAppointments]);
   };
 
   const updateAppointment = (updatedAppointment: Appointment) => {
-    const nextAppointments = appointments.map(a => a.id === updatedAppointment.id ? updatedAppointment : a);
-    setAppointments(nextAppointments);
-    saveState(projects, patients, nextAppointments);
+    setAppointments(prev => prev.map(a => a.id === updatedAppointment.id ? updatedAppointment : a));
   };
 
   const deleteAppointment = (appointment: Appointment) => {
     const baseId = appointment.id.split('-')[0];
     const targetDate = startOfDay(new Date(appointment.date));
     
-    setAppointments(prev => {
-      const nextAppointments = prev.filter(a => {
-        const aBaseId = a.id.split('-')[0];
-        if (aBaseId === baseId && !isBefore(startOfDay(new Date(a.date)), targetDate)) {
-          return false;
-        }
-        return true;
-      });
-      setTimeout(() => saveState(projects, patients, nextAppointments), 0);
-      return nextAppointments;
-    });
+    setAppointments(prev => prev.filter(a => {
+      const aBaseId = a.id.split('-')[0];
+      if (aBaseId === baseId && !isBefore(startOfDay(new Date(a.date)), targetDate)) {
+        return false;
+      }
+      return true;
+    }));
   };
 
   return {
