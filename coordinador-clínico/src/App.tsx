@@ -53,13 +53,13 @@ export default function App() {
     setEditingProject(undefined);
   };
 
-  const handleSaveProject = (projectData: Omit<Project, 'id'> | Project, projectPatients: {id?: string, name: string, color?: string}[]) => {
+  const handleSaveProject = async (projectData: Omit<Project, 'id'> | Project, projectPatients: {id?: string, name: string, color?: string}[]) => {
     let savedProjectId = '';
     if ('id' in projectData) {
       updateProject(projectData as Project);
       savedProjectId = projectData.id;
     } else {
-      savedProjectId = addProject(projectData);
+      savedProjectId = await addProject(projectData);
     }
     syncProjectPatients(savedProjectId, projectPatients);
   };
