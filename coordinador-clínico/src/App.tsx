@@ -11,7 +11,7 @@ import { es } from 'date-fns/locale';
 import { AlertTriangle, Menu } from 'lucide-react';
 
 export default function App() {
-  const { projects, patients, appointments, addProject, updateProject, deletePatient, syncProjectPatients, addAppointment, updateAppointment, deleteAppointment } = useClinicalStore();
+  const { projects, patients, appointments, addProject, updateProject, deletePatient, syncProjectPatients, addAppointment, updateAppointment, deleteAppointment, addClinicalSchedule } = useClinicalStore();
   
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -200,6 +200,7 @@ export default function App() {
           onClose={() => setIsAppointmentModalOpen(false)}
           onSave={handleSaveAppointment}
           onDelete={deleteAppointment}
+          onGenerateClinicalSchedule={addClinicalSchedule}
           projects={projects}
           patients={patients}
           initialDate={selectedDate}

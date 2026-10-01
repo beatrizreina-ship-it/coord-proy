@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Appointment, Project, Patient } from './types';
+import { Appointment, Project, Patient, CLINICAL_VISIT_PERIODS } from './types';
 import { addDays, addWeeks, addMonths, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import { supabase } from './supabaseClient';
 
@@ -262,6 +262,53 @@ export function useClinicalStore() {
     }
   };
 
+  // Generate a full clinical protocol schedule starting from a D1 appointment
+  const addClinicalSchedule = async (d1Appointment: Omit<Appointment, 'id'>) => {
+    const d1Date = d1Appointment.date;
+    const newAppointments: Appointment[] = [];
+
+    // D1 itself
+    newAppointments.push({
+      ...d1Appointment,
+      id: generateId(),
+      visitPeriod: 'D1',
+      flexibilityDays: 0,
+      recurrence: 'none',
+    });
+
+    // All subsequent visits from M0.5 onwards
+    for (const period of CLINICAL_VISIT_PERIODS) {
+      if (period.daysFromD1 === null || period.daysFromD1 === 0) continue; // skip Screening and D1
+      const visitDate = addDays(d1Date, period.daysFromD1);
+      newAppointments.push({
+        id: generateId(),
+        projectId: d1Appointment.projectId,
+        patientId: d1Appointment.patientId,
+        title: `${period.key} – ${d1Appointment.title.replace(/^D1\s*[–-]?\s*/i, '').trim() || 'Visita'}`,
+        category: d1Appointment.category,
+        date: visitDate,
+        time: d1Appointment.time,
+        recurrence: 'none',
+        recurrenceInterval: 1,
+        flexibilityDays: period.defaultWindow,
+        notes: '',
+        visitPeriod: period.key,
+      });
+    }
+
+    // Optimistic update
+    setAppointments(prev => [...prev, ...newAppointments]);
+
+    // Save to Supabase
+    const dbAppointments = newAppointments.map(a => ({
+      ...a,
+      date: a.date.toISOString(),
+      recurrenceEndDate: null,
+    }));
+    const { error } = await supabase.from('appointments').insert(dbAppointments);
+    if (error) console.error('Error adding clinical schedule', error);
+  };
+
   return {
     projects,
     patients,
@@ -274,6 +321,7 @@ export function useClinicalStore() {
     syncProjectPatients,
     addAppointment,
     updateAppointment,
-    deleteAppointment
+    deleteAppointment,
+    addClinicalSchedule,
   };
 }
