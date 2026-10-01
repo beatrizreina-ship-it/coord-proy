@@ -141,31 +141,34 @@ export function useClinicalStore() {
     }
   };
 
-  const syncProjectPatients = async (projectId: string, newPatients: {id?: string, name: string, color?: string}[]) => {
+  const syncProjectPatients = async (projectId: string, newPatients: {id?: string, name: string, color?: string}[], currentPatients: Patient[] = patients) => {
+    // Compute BEFORE setPatients so the Supabase loops always have the correct data
+    const otherPatients = currentPatients.filter(p => p.projectId !== projectId);
     const newPatientsToInsert: Patient[] = [];
     const patientsToUpdate: Patient[] = [];
-    
-    setPatients(prev => {
-      const otherPatients = prev.filter(p => p.projectId !== projectId);
-      const updatedProjectPatients = newPatients.map(p => {
-         if (p.id) {
-           const existing = prev.find(ext => ext.id === p.id);
-           const updated = existing ? { ...existing, name: p.name, color: p.color } : { id: p.id, projectId, name: p.name, contact: '', notes: '', color: p.color };
-           patientsToUpdate.push(updated);
-           return updated;
-         }
-         const newPat = { id: generateId(), projectId, name: p.name, contact: '', notes: '', color: p.color };
-         newPatientsToInsert.push(newPat);
-         return newPat;
-      });
-      return [...otherPatients, ...updatedProjectPatients];
+
+    const updatedProjectPatients = newPatients.map(p => {
+      if (p.id) {
+        const existing = currentPatients.find(ext => ext.id === p.id);
+        const updated = existing
+          ? { ...existing, name: p.name, color: p.color }
+          : { id: p.id, projectId, name: p.name, contact: '', notes: '', color: p.color };
+        patientsToUpdate.push(updated);
+        return updated;
+      }
+      const newPat = { id: generateId(), projectId, name: p.name, contact: '', notes: '', color: p.color };
+      newPatientsToInsert.push(newPat);
+      return newPat;
     });
 
+    // Optimistic update with already-computed list
+    setPatients([...otherPatients, ...updatedProjectPatients]);
+
     for (const pat of newPatientsToInsert) {
-       await supabase.from('patients').insert(pat);
+      await supabase.from('patients').insert(pat);
     }
     for (const pat of patientsToUpdate) {
-       await supabase.from('patients').update(pat).eq('id', pat.id);
+      await supabase.from('patients').update(pat).eq('id', pat.id);
     }
   };
 

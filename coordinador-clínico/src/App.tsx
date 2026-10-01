@@ -61,7 +61,8 @@ export default function App() {
     } else {
       savedProjectId = await addProject(projectData);
     }
-    syncProjectPatients(savedProjectId, projectPatients);
+    // Pass patients explicitly to avoid stale closure after async addProject
+    syncProjectPatients(savedProjectId, projectPatients, patients);
   };
 
   const handleSaveAppointment = (appointment: Omit<Appointment, 'id'> | Appointment) => {
