@@ -175,9 +175,9 @@ export function CalendarView({
                         `}
                         title={`Ventana de ±${app.flexibilityDays} días para: ${app.title}`}
                       >
-                        <div className="flex items-center gap-0.5 shrink-0">
+                        <div className="flex items-center gap-1 shrink-0">
                            {renderIcon(app.category)}
-                           <span className="hidden md:inline">[±{app.flexibilityDays}d]</span>
+                           <span className="text-[7px] md:text-[8px] font-bold bg-black/10 px-1 py-0.5 rounded text-gray-700">±{app.flexibilityDays}d</span>
                         </div>
                         <span className="truncate w-full text-center md:text-left">{app.title}</span>
                       </div>
@@ -198,8 +198,13 @@ export function CalendarView({
                         `}
                         title={app.title}
                       >
-                        <div className="flex justify-center md:justify-start shrink-0 mb-0.5 md:mb-0 md:mr-1">
+                        <div className="flex justify-center md:justify-start shrink-0 mb-0.5 md:mb-0 md:mr-1 items-center gap-0.5">
                            {renderIcon(app.category)}
+                           {app.visitPeriod && !app.title.toUpperCase().startsWith(app.visitPeriod.toUpperCase()) && (
+                             <span className="text-[7px] md:text-[8px] font-extrabold bg-[#007B83]/20 text-[#007B83] px-1 rounded">
+                               {app.visitPeriod}
+                             </span>
+                           )}
                         </div>
                         <span className="truncate w-full text-center md:text-left">{app.title}</span>
                       </div>

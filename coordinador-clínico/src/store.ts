@@ -8,11 +8,21 @@ const defaultPatients: Patient[] = [];
 const defaultAppointments: Appointment[] = [];
 
 const parseAppointments = (appointments: any[]) => {
-  return appointments.map((a: any) => ({ 
-    ...a, 
-    date: new Date(a.date),
-    recurrenceEndDate: a.recurrenceEndDate ? new Date(a.recurrenceEndDate) : undefined
-  }));
+  return appointments.map((a: any) => {
+    let visitPeriod = a.visitPeriod;
+    if (!visitPeriod && a.title) {
+      const match = a.title.match(/^(Screening|D1|M0\.5|M0,5|M1\.5|M1,5|M2\.5|M2,5|M\d+)\b/i);
+      if (match) {
+        visitPeriod = match[1].replace(',', '.');
+      }
+    }
+    return {
+      ...a,
+      visitPeriod,
+      date: new Date(a.date),
+      recurrenceEndDate: a.recurrenceEndDate ? new Date(a.recurrenceEndDate) : undefined
+    };
+  });
 };
 
 const generateId = () => crypto.randomUUID();
@@ -214,29 +224,52 @@ export function useClinicalStore() {
     // Optimistic update
     setAppointments(prev => [...prev, ...newAppointments]);
     
-    // Convert dates to strings for Supabase insertion
-    const dbAppointments = newAppointments.map(a => ({
+    // Save to Supabase (resilient if visitPeriod column is not in DB)
+    try {
+      const dbAppointments = newAppointments.map(a => ({
         ...a,
         date: a.date.toISOString(),
         recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null
-    }));
+      }));
 
-    const { error } = await supabase.from('appointments').insert(dbAppointments);
-    if (error) console.error('Error adding appointments', error);
+      const { error } = await supabase.from('appointments').insert(dbAppointments);
+      if (error) {
+        const fallback = newAppointments.map(a => {
+          const { visitPeriod, ...clean } = a;
+          return {
+            ...clean,
+            date: a.date.toISOString(),
+            recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null
+          };
+        });
+        const res = await supabase.from('appointments').insert(fallback);
+        if (res.error) console.error('Error adding appointments fallback', res.error);
+      }
+    } catch (err) {
+      console.error('Error in addAppointment', err);
+    }
   };
 
   const updateAppointment = async (updatedAppointment: Appointment) => {
     // Optimistic update
     setAppointments(prev => prev.map(a => a.id === updatedAppointment.id ? updatedAppointment : a));
     
-    const dbAppt = {
+    try {
+      const dbAppt = {
         ...updatedAppointment,
         date: updatedAppointment.date.toISOString(),
         recurrenceEndDate: updatedAppointment.recurrenceEndDate ? updatedAppointment.recurrenceEndDate.toISOString() : null
-    };
-    
-    const { error } = await supabase.from('appointments').update(dbAppt).eq('id', updatedAppointment.id);
-    if (error) console.error('Error updating appointment', error);
+      };
+      
+      const { error } = await supabase.from('appointments').update(dbAppt).eq('id', updatedAppointment.id);
+      if (error) {
+        const { visitPeriod, ...clean } = dbAppt;
+        const res = await supabase.from('appointments').update(clean).eq('id', updatedAppointment.id);
+        if (res.error) console.error('Error updating appointment fallback', res.error);
+      }
+    } catch (err) {
+      console.error('Error in updateAppointment', err);
+    }
   };
 
   const deleteAppointment = async (appointment: Appointment) => {
@@ -267,16 +300,29 @@ export function useClinicalStore() {
     const d1Date = d1Appointment.date;
     const newAppointments: Appointment[] = [];
 
+    // Clean any existing period prefix to keep the user's custom name
+    const rawSuffix = d1Appointment.title
+      .replace(/^(Screening|D1|M0\.5|M0,5|M1\.5|M1,5|M2\.5|M2,5|M\d+)\s*[–-]?\s*/i, '')
+      .trim();
+    const cleanSuffix = rawSuffix && !['inicio de tratamiento', 'visita'].includes(rawSuffix.toLowerCase())
+      ? ` – ${rawSuffix}`
+      : ' – Visita';
+
     // D1 itself
+    const d1Title = d1Appointment.title.startsWith('D1') 
+      ? d1Appointment.title 
+      : `D1${cleanSuffix}`;
+
     newAppointments.push({
       ...d1Appointment,
       id: generateId(),
+      title: d1Title,
       visitPeriod: 'D1',
       flexibilityDays: 0,
       recurrence: 'none',
     });
 
-    // All subsequent visits from M0.5 onwards
+    // All subsequent visits from M0.5 onwards every 15 days, then quarterly/yearly
     for (const period of CLINICAL_VISIT_PERIODS) {
       if (period.daysFromD1 === null || period.daysFromD1 === 0) continue; // skip Screening and D1
       const visitDate = addDays(d1Date, period.daysFromD1);
@@ -284,7 +330,7 @@ export function useClinicalStore() {
         id: generateId(),
         projectId: d1Appointment.projectId,
         patientId: d1Appointment.patientId,
-        title: `${period.key} – ${d1Appointment.title.replace(/^D1\s*[–-]?\s*/i, '').trim() || 'Visita'}`,
+        title: `${period.key}${cleanSuffix}`,
         category: d1Appointment.category,
         date: visitDate,
         time: d1Appointment.time,
@@ -299,14 +345,30 @@ export function useClinicalStore() {
     // Optimistic update
     setAppointments(prev => [...prev, ...newAppointments]);
 
-    // Save to Supabase
-    const dbAppointments = newAppointments.map(a => ({
-      ...a,
-      date: a.date.toISOString(),
-      recurrenceEndDate: null,
-    }));
-    const { error } = await supabase.from('appointments').insert(dbAppointments);
-    if (error) console.error('Error adding clinical schedule', error);
+    // Save to Supabase (resilient if visitPeriod column isn't created in Supabase yet)
+    try {
+      const dbAppointments = newAppointments.map(a => ({
+        ...a,
+        date: a.date.toISOString(),
+        recurrenceEndDate: null,
+      }));
+      const { error } = await supabase.from('appointments').insert(dbAppointments);
+      if (error) {
+        // Fallback without visitPeriod column
+        const fallback = newAppointments.map(a => {
+          const { visitPeriod, ...clean } = a;
+          return {
+            ...clean,
+            date: a.date.toISOString(),
+            recurrenceEndDate: null,
+          };
+        });
+        const res = await supabase.from('appointments').insert(fallback);
+        if (res.error) console.error('Error adding clinical schedule fallback', res.error);
+      }
+    } catch (err) {
+      console.error('Error adding clinical schedule to Supabase', err);
+    }
   };
 
   return {

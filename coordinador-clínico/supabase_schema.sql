@@ -41,6 +41,7 @@ CREATE TABLE appointments (
   "recurrenceInterval" INTEGER,
   "recurrenceEndDate" TIMESTAMPTZ,
   "flexibilityDays" INTEGER,
+  "visitPeriod" TEXT,
   notes TEXT
 );
 
