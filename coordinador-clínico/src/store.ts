@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Appointment, Project, Patient, CLINICAL_VISIT_PERIODS } from './types';
 import { addDays, addWeeks, addMonths, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import { supabase } from './supabaseClient';
 
-const defaultProjects: Project[] = [];
-const defaultPatients: Patient[] = [];
-const defaultAppointments: Appointment[] = [];
+const STORAGE_KEYS = {
+  PROJECTS: 'cc_projects_cache',
+  PATIENTS: 'cc_patients_cache',
+  APPOINTMENTS: 'cc_appointments_cache',
+};
 
-const parseAppointments = (appointments: any[]) => {
+const parseAppointments = (appointments: any[]): Appointment[] => {
+  if (!Array.isArray(appointments)) return [];
   return appointments.map((a: any) => {
     let visitPeriod = a.visitPeriod;
     if (!visitPeriod && a.title) {
@@ -25,16 +28,57 @@ const parseAppointments = (appointments: any[]) => {
   });
 };
 
+const loadFromLocalStorage = <T>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+};
+
+const saveToLocalStorage = (key: string, data: any) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (err) {
+    console.warn(`Error caching ${key} to localStorage:`, err);
+  }
+};
+
 const generateId = () => crypto.randomUUID();
 
-export function useClinicalStore() {
-  const [projects, setProjects] = useState<Project[]>(defaultProjects);
-  const [patients, setPatients] = useState<Patient[]>(defaultPatients);
-  const [appointments, setAppointments] = useState<Appointment[]>(defaultAppointments);
+export type SyncStatus = 'synced' | 'syncing' | 'error';
 
-  // Fetch initial data
+export function useClinicalStore() {
+  // Initialize with local cache first to ensure immediate offline availability and instant rendering
+  const [projects, setProjects] = useState<Project[]>(() => loadFromLocalStorage(STORAGE_KEYS.PROJECTS, []));
+  const [patients, setPatients] = useState<Patient[]>(() => loadFromLocalStorage(STORAGE_KEYS.PATIENTS, []));
+  const [appointments, setAppointments] = useState<Appointment[]>(() => {
+    const cached = loadFromLocalStorage<any[]>(STORAGE_KEYS.APPOINTMENTS, []);
+    return parseAppointments(cached);
+  });
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
+
+  // Keep localStorage synced whenever state changes
   useEffect(() => {
+    saveToLocalStorage(STORAGE_KEYS.PROJECTS, projects);
+  }, [projects]);
+
+  useEffect(() => {
+    saveToLocalStorage(STORAGE_KEYS.PATIENTS, patients);
+  }, [patients]);
+
+  useEffect(() => {
+    saveToLocalStorage(STORAGE_KEYS.APPOINTMENTS, appointments);
+  }, [appointments]);
+
+  // Fetch initial data from Supabase
+  useEffect(() => {
+    let isMounted = true;
+
     const fetchData = async () => {
+      setSyncStatus('syncing');
       try {
         const [projectsRes, patientsRes, appointmentsRes] = await Promise.all([
           supabase.from('projects').select('*'),
@@ -42,15 +86,43 @@ export function useClinicalStore() {
           supabase.from('appointments').select('*')
         ]);
 
-        if (projectsRes.data) setProjects(projectsRes.data as Project[]);
-        if (patientsRes.data) setPatients(patientsRes.data as Patient[]);
-        if (appointmentsRes.data) setAppointments(parseAppointments(appointmentsRes.data));
+        if (!isMounted) return;
+
+        let hasError = false;
+
+        if (projectsRes.error) {
+          console.error('Error fetching projects from Supabase:', projectsRes.error);
+          hasError = true;
+        } else if (projectsRes.data) {
+          setProjects(projectsRes.data as Project[]);
+        }
+
+        if (patientsRes.error) {
+          console.error('Error fetching patients from Supabase:', patientsRes.error);
+          hasError = true;
+        } else if (patientsRes.data) {
+          setPatients(patientsRes.data as Patient[]);
+        }
+
+        if (appointmentsRes.error) {
+          console.error('Error fetching appointments from Supabase:', appointmentsRes.error);
+          hasError = true;
+        } else if (appointmentsRes.data) {
+          setAppointments(parseAppointments(appointmentsRes.data));
+        }
+
+        setSyncStatus(hasError ? 'error' : 'synced');
       } catch (error) {
-        console.error('Error fetching initial data from Supabase', error);
+        console.error('Error connecting to Supabase:', error);
+        if (isMounted) setSyncStatus('error');
       }
     };
 
     fetchData();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Setup Realtime subscriptions
@@ -106,79 +178,163 @@ export function useClinicalStore() {
 
   const addProject = async (project: Omit<Project, 'id'>) => {
     const newProject = { ...project, id: generateId() };
-    // Optimistic update
     setProjects(prev => [...prev, newProject]);
-    const { error } = await supabase.from('projects').insert(newProject);
-    if (error) console.error('Error adding project', error);
+    setSyncStatus('syncing');
+
+    try {
+      const { error } = await supabase.from('projects').insert(newProject);
+      if (error) {
+        console.error('Error adding project to Supabase:', error);
+        setSyncStatus('error');
+      } else {
+        setSyncStatus('synced');
+      }
+    } catch (err) {
+      console.error('Error in addProject:', err);
+      setSyncStatus('error');
+    }
     return newProject.id;
   };
 
   const updateProject = async (updatedProject: Project) => {
-    // Optimistic update
     setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
-    const { error } = await supabase.from('projects').update(updatedProject).eq('id', updatedProject.id);
-    if (error) console.error('Error updating project', error);
+    setSyncStatus('syncing');
+
+    try {
+      const { error } = await supabase.from('projects').update(updatedProject).eq('id', updatedProject.id);
+      if (error) {
+        console.error('Error updating project in Supabase:', error);
+        setSyncStatus('error');
+      } else {
+        setSyncStatus('synced');
+      }
+    } catch (err) {
+      console.error('Error in updateProject:', err);
+      setSyncStatus('error');
+    }
   };
 
   const deleteProject = async (id: string) => {
-    // Optimistic update
     setProjects(prev => prev.filter(p => p.id !== id));
     setPatients(prev => prev.filter(p => p.projectId !== id));
     setAppointments(prev => prev.filter(a => a.projectId !== id));
-    const { error } = await supabase.from('projects').delete().eq('id', id);
-    if (error) console.error('Error deleting project', error);
+    setSyncStatus('syncing');
+
+    try {
+      // Clean up child tables to prevent orphans in Supabase
+      await supabase.from('appointments').delete().eq('projectId', id);
+      await supabase.from('patients').delete().eq('projectId', id);
+      const { error } = await supabase.from('projects').delete().eq('id', id);
+
+      if (error) {
+        console.error('Error deleting project from Supabase:', error);
+        setSyncStatus('error');
+      } else {
+        setSyncStatus('synced');
+      }
+    } catch (err) {
+      console.error('Error in deleteProject:', err);
+      setSyncStatus('error');
+    }
   };
 
   const addPatient = async (patient: Omit<Patient, 'id'>) => {
     const newPatient = { ...patient, id: generateId() };
-    // Optimistic update
     setPatients(prev => [...prev, newPatient]);
-    const { error } = await supabase.from('patients').insert(newPatient);
-    if (error) console.error('Error adding patient', error);
+    setSyncStatus('syncing');
+
+    try {
+      const { error } = await supabase.from('patients').insert(newPatient);
+      if (error) {
+        console.error('Error adding patient to Supabase:', error);
+        setSyncStatus('error');
+      } else {
+        setSyncStatus('synced');
+      }
+    } catch (err) {
+      console.error('Error in addPatient:', err);
+      setSyncStatus('error');
+    }
   };
 
   const deletePatient = async (id: string) => {
-    if (window.confirm('¿Está seguro de que desea eliminar a este paciente? Esta acción no se puede deshacer.')) {
-      // Optimistic update
-      setPatients(prev => prev.filter(p => p.id !== id));
-      setAppointments(prev => prev.map(a => a.patientId === id ? { ...a, patientId: undefined } : a));
-      
-      const { error } = await supabase.from('patients').delete().eq('id', id);
-      if (error) console.error('Error deleting patient', error);
-      
-      // Update appointments on server too
+    if (!window.confirm('¿Está seguro de que desea eliminar a este paciente? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
+    setPatients(prev => prev.filter(p => p.id !== id));
+    setAppointments(prev => prev.map(a => a.patientId === id ? { ...a, patientId: undefined } : a));
+    setSyncStatus('syncing');
+
+    try {
       await supabase.from('appointments').update({ patientId: null }).eq('patientId', id);
+      const { error } = await supabase.from('patients').delete().eq('id', id);
+      if (error) {
+        console.error('Error deleting patient from Supabase:', error);
+        setSyncStatus('error');
+      } else {
+        setSyncStatus('synced');
+      }
+    } catch (err) {
+      console.error('Error in deletePatient:', err);
+      setSyncStatus('error');
     }
   };
 
-  const syncProjectPatients = async (projectId: string, newPatients: {id?: string, name: string, color?: string}[], currentPatients: Patient[] = patients) => {
-    // Compute BEFORE setPatients so the Supabase loops always have the correct data
+  const syncProjectPatients = async (
+    projectId: string, 
+    newPatients: { id?: string; name: string; color?: string }[], 
+    currentPatients: Patient[] = patients
+  ) => {
+    setSyncStatus('syncing');
     const otherPatients = currentPatients.filter(p => p.projectId !== projectId);
-    const newPatientsToInsert: Patient[] = [];
-    const patientsToUpdate: Patient[] = [];
+    const existingProjectPatients = currentPatients.filter(p => p.projectId === projectId);
 
-    const updatedProjectPatients = newPatients.map(p => {
+    const updatedProjectPatients: Patient[] = [];
+    const patientsToUpsert: Patient[] = [];
+    const activeIds = new Set<string>();
+
+    for (const p of newPatients) {
+      if (!p.name.trim()) continue;
+
       if (p.id) {
-        const existing = currentPatients.find(ext => ext.id === p.id);
-        const updated = existing
+        activeIds.add(p.id);
+        const existing = existingProjectPatients.find(ext => ext.id === p.id);
+        const updated: Patient = existing
           ? { ...existing, name: p.name, color: p.color }
           : { id: p.id, projectId, name: p.name, contact: '', notes: '', color: p.color };
-        patientsToUpdate.push(updated);
-        return updated;
+        patientsToUpsert.push(updated);
+        updatedProjectPatients.push(updated);
+      } else {
+        const newId = generateId();
+        activeIds.add(newId);
+        const newPat: Patient = { id: newId, projectId, name: p.name, contact: '', notes: '', color: p.color };
+        patientsToUpsert.push(newPat);
+        updatedProjectPatients.push(newPat);
       }
-      const newPat = { id: generateId(), projectId, name: p.name, contact: '', notes: '', color: p.color };
-      newPatientsToInsert.push(newPat);
-      return newPat;
-    });
+    }
 
-    // Optimistic update with already-computed list
+    // Find patients removed in this edit
+    const patientsToDelete = existingProjectPatients.filter(p => !activeIds.has(p.id));
+
+    // Optimistic update
     setPatients([...otherPatients, ...updatedProjectPatients]);
 
-    for (const pat of newPatientsToInsert) {
-      await supabase.from('patients').insert(pat);
-    }
-    for (const pat of patientsToUpdate) {
-      await supabase.from('patients').update(pat).eq('id', pat.id);
+    try {
+      if (patientsToUpsert.length > 0) {
+        const { error } = await supabase.from('patients').upsert(patientsToUpsert);
+        if (error) console.error('Error upserting patients to Supabase:', error);
+      }
+
+      if (patientsToDelete.length > 0) {
+        const idsToDelete = patientsToDelete.map(p => p.id);
+        await supabase.from('patients').delete().in('id', idsToDelete);
+        await supabase.from('appointments').update({ patientId: null }).in('patientId', idsToDelete);
+      }
+      setSyncStatus('synced');
+    } catch (err) {
+      console.error('Error in syncProjectPatients:', err);
+      setSyncStatus('error');
     }
   };
 
@@ -190,7 +346,6 @@ export function useClinicalStore() {
 
     if (appointment.recurrence !== 'none') {
       const interval = appointment.recurrenceInterval || 1;
-      // If no end date is set, default to 1 year from the start date
       const effectiveEndDate = appointment.recurrenceEndDate ?? addMonths(appointment.date, 12);
       let currentDate = appointment.date;
       let counter = 0;
@@ -216,20 +371,19 @@ export function useClinicalStore() {
           ...appointment,
           id: `${baseId}-${counter}`,
           date: currentDate,
-          flexibilityDays: appointment.flexibilityDays // ensure flexibility is propagated
+          flexibilityDays: appointment.flexibilityDays,
         });
       }
     }
     
-    // Optimistic update
     setAppointments(prev => [...prev, ...newAppointments]);
-    
-    // Save to Supabase (resilient if visitPeriod column is not in DB)
+    setSyncStatus('syncing');
+
     try {
       const dbAppointments = newAppointments.map(a => ({
         ...a,
         date: a.date.toISOString(),
-        recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null
+        recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null,
       }));
 
       const { error } = await supabase.from('appointments').insert(dbAppointments);
@@ -239,36 +393,52 @@ export function useClinicalStore() {
           return {
             ...clean,
             date: a.date.toISOString(),
-            recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null
+            recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null,
           };
         });
         const res = await supabase.from('appointments').insert(fallback);
-        if (res.error) console.error('Error adding appointments fallback', res.error);
+        if (res.error) {
+          console.error('Error adding appointments fallback:', res.error);
+          setSyncStatus('error');
+        } else {
+          setSyncStatus('synced');
+        }
+      } else {
+        setSyncStatus('synced');
       }
     } catch (err) {
-      console.error('Error in addAppointment', err);
+      console.error('Error in addAppointment:', err);
+      setSyncStatus('error');
     }
   };
 
   const updateAppointment = async (updatedAppointment: Appointment) => {
-    // Optimistic update
     setAppointments(prev => prev.map(a => a.id === updatedAppointment.id ? updatedAppointment : a));
-    
+    setSyncStatus('syncing');
+
     try {
       const dbAppt = {
         ...updatedAppointment,
         date: updatedAppointment.date.toISOString(),
-        recurrenceEndDate: updatedAppointment.recurrenceEndDate ? updatedAppointment.recurrenceEndDate.toISOString() : null
+        recurrenceEndDate: updatedAppointment.recurrenceEndDate ? updatedAppointment.recurrenceEndDate.toISOString() : null,
       };
       
       const { error } = await supabase.from('appointments').update(dbAppt).eq('id', updatedAppointment.id);
       if (error) {
         const { visitPeriod, ...clean } = dbAppt;
         const res = await supabase.from('appointments').update(clean).eq('id', updatedAppointment.id);
-        if (res.error) console.error('Error updating appointment fallback', res.error);
+        if (res.error) {
+          console.error('Error updating appointment fallback:', res.error);
+          setSyncStatus('error');
+        } else {
+          setSyncStatus('synced');
+        }
+      } else {
+        setSyncStatus('synced');
       }
     } catch (err) {
-      console.error('Error in updateAppointment', err);
+      console.error('Error in updateAppointment:', err);
+      setSyncStatus('error');
     }
   };
 
@@ -276,7 +446,6 @@ export function useClinicalStore() {
     const baseId = appointment.id.split('-')[0];
     const targetDate = startOfDay(new Date(appointment.date));
     
-    // Gather IDs to delete
     const idsToDelete = appointments.filter(a => {
       const aBaseId = a.id.split('-')[0];
       if (aBaseId === baseId && !isBefore(startOfDay(new Date(a.date)), targetDate)) {
@@ -285,22 +454,29 @@ export function useClinicalStore() {
       return false;
     }).map(a => a.id);
 
-    // Optimistic update
     setAppointments(prev => prev.filter(a => !idsToDelete.includes(a.id)));
-    
-    // Delete from Supabase in batches or IN clause
+    setSyncStatus('syncing');
+
     if (idsToDelete.length > 0) {
-      const { error } = await supabase.from('appointments').delete().in('id', idsToDelete);
-      if (error) console.error('Error deleting appointments', error);
+      try {
+        const { error } = await supabase.from('appointments').delete().in('id', idsToDelete);
+        if (error) {
+          console.error('Error deleting appointments:', error);
+          setSyncStatus('error');
+        } else {
+          setSyncStatus('synced');
+        }
+      } catch (err) {
+        console.error('Error in deleteAppointment:', err);
+        setSyncStatus('error');
+      }
     }
   };
 
-  // Generate a full clinical protocol schedule starting from a D1 appointment
   const addClinicalSchedule = async (d1Appointment: Omit<Appointment, 'id'>) => {
     const d1Date = d1Appointment.date;
     const newAppointments: Appointment[] = [];
 
-    // Clean any existing period prefix to keep the user's custom name
     const rawSuffix = d1Appointment.title
       .replace(/^(Screening|D1|M0\.5|M0,5|M1\.5|M1,5|M2\.5|M2,5|M\d+)\s*[–-]?\s*/i, '')
       .trim();
@@ -308,7 +484,6 @@ export function useClinicalStore() {
       ? ` – ${rawSuffix}`
       : ' – Visita';
 
-    // D1 itself
     const d1Title = d1Appointment.title.startsWith('D1') 
       ? d1Appointment.title 
       : `D1${cleanSuffix}`;
@@ -322,9 +497,8 @@ export function useClinicalStore() {
       recurrence: 'none',
     });
 
-    // All subsequent visits from M0.5 onwards every 15 days, then quarterly/yearly
     for (const period of CLINICAL_VISIT_PERIODS) {
-      if (period.daysFromD1 === null || period.daysFromD1 === 0) continue; // skip Screening and D1
+      if (period.daysFromD1 === null || period.daysFromD1 === 0) continue;
       const visitDate = addDays(d1Date, period.daysFromD1);
       newAppointments.push({
         id: generateId(),
@@ -342,10 +516,9 @@ export function useClinicalStore() {
       });
     }
 
-    // Optimistic update
     setAppointments(prev => [...prev, ...newAppointments]);
+    setSyncStatus('syncing');
 
-    // Save to Supabase (resilient if visitPeriod column isn't created in Supabase yet)
     try {
       const dbAppointments = newAppointments.map(a => ({
         ...a,
@@ -354,7 +527,6 @@ export function useClinicalStore() {
       }));
       const { error } = await supabase.from('appointments').insert(dbAppointments);
       if (error) {
-        // Fallback without visitPeriod column
         const fallback = newAppointments.map(a => {
           const { visitPeriod, ...clean } = a;
           return {
@@ -364,10 +536,18 @@ export function useClinicalStore() {
           };
         });
         const res = await supabase.from('appointments').insert(fallback);
-        if (res.error) console.error('Error adding clinical schedule fallback', res.error);
+        if (res.error) {
+          console.error('Error adding clinical schedule fallback:', res.error);
+          setSyncStatus('error');
+        } else {
+          setSyncStatus('synced');
+        }
+      } else {
+        setSyncStatus('synced');
       }
     } catch (err) {
-      console.error('Error adding clinical schedule to Supabase', err);
+      console.error('Error adding clinical schedule to Supabase:', err);
+      setSyncStatus('error');
     }
   };
 
@@ -375,6 +555,7 @@ export function useClinicalStore() {
     projects,
     patients,
     appointments,
+    syncStatus,
     addProject,
     updateProject,
     deleteProject,

@@ -11,7 +11,7 @@ import { es } from 'date-fns/locale';
 import { AlertTriangle, Menu } from 'lucide-react';
 
 export default function App() {
-  const { projects, patients, appointments, addProject, updateProject, deletePatient, syncProjectPatients, addAppointment, updateAppointment, deleteAppointment, addClinicalSchedule } = useClinicalStore();
+  const { projects, patients, appointments, syncStatus, addProject, updateProject, deletePatient, syncProjectPatients, addAppointment, updateAppointment, deleteAppointment, addClinicalSchedule } = useClinicalStore();
   
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -148,6 +148,26 @@ export default function App() {
                 <span className="text-gray-400">/</span>
                 <span className="text-sm text-[#4F4F4F] truncate max-w-[100px] sm:max-w-none">{patients.find(p => p.id === selectedPatientId)?.name}</span>
               </>
+            )}
+
+            {/* Cloud Sync Status Indicator */}
+            {syncStatus === 'synced' && (
+              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60" title="Conectado y sincronizado con la nube">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="hidden sm:inline">Guardado en la nube</span>
+              </span>
+            )}
+            {syncStatus === 'syncing' && (
+              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200/60" title="Sincronizando cambios...">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                <span className="hidden sm:inline">Guardando...</span>
+              </span>
+            )}
+            {syncStatus === 'error' && (
+              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60" title="Guardado localmente. Revisando conexión a la nube...">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                <span className="hidden sm:inline">Copia local (offline)</span>
+              </span>
             )}
           </div>
           <div className="flex gap-2">
