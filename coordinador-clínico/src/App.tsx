@@ -8,10 +8,25 @@ import { useClinicalStore } from './store';
 import { Project, Appointment } from './types';
 import { isWithinInterval, startOfDay, addDays, format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { AlertTriangle, Menu } from 'lucide-react';
+import { AlertTriangle, Menu, RefreshCw } from 'lucide-react';
 
 export default function App() {
-  const { projects, patients, appointments, syncStatus, addProject, updateProject, deletePatient, syncProjectPatients, addAppointment, updateAppointment, deleteAppointment, addClinicalSchedule } = useClinicalStore();
+  const { 
+    projects, 
+    patients, 
+    appointments, 
+    syncStatus, 
+    syncErrorDetail,
+    retrySync,
+    addProject, 
+    updateProject, 
+    deletePatient, 
+    syncProjectPatients, 
+    addAppointment, 
+    updateAppointment, 
+    deleteAppointment, 
+    addClinicalSchedule 
+  } = useClinicalStore();
   
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -152,22 +167,34 @@ export default function App() {
 
             {/* Cloud Sync Status Indicator */}
             {syncStatus === 'synced' && (
-              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60" title="Conectado y sincronizado con la nube">
+              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60" title="Conectado y sincronizado con Supabase">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 <span className="hidden sm:inline">Guardado en la nube</span>
               </span>
             )}
             {syncStatus === 'syncing' && (
-              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200/60" title="Sincronizando cambios...">
+              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200/60" title="Sincronizando cambios con Supabase...">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                 <span className="hidden sm:inline">Guardando...</span>
               </span>
             )}
             {syncStatus === 'error' && (
-              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60" title="Guardado localmente. Revisando conexión a la nube...">
+              <button 
+                type="button"
+                onClick={() => {
+                  if (syncErrorDetail) {
+                    alert(`Diagnóstico de conexión a Supabase:\n\n${syncErrorDetail}\n\nReintentando sincronización ahora...`);
+                  }
+                  retrySync();
+                }}
+                className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shadow-xs" 
+                title={syncErrorDetail ? `Aviso: ${syncErrorDetail}. Pulsa para reintentar.` : "Guardado localmente. Pulsa para reconectar con la nube."}
+              >
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                 <span className="hidden sm:inline">Copia local (offline)</span>
-              </span>
+                <span className="sm:hidden">Offline</span>
+                <RefreshCw size={10} className="ml-1 opacity-70" />
+              </button>
             )}
           </div>
           <div className="flex gap-2">

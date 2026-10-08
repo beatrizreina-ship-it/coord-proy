@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Appointment, Project, Patient, CLINICAL_VISIT_PERIODS } from './types';
 import { addDays, addWeeks, addMonths, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import { supabase } from './supabaseClient';
@@ -59,6 +59,7 @@ export function useClinicalStore() {
     return parseAppointments(cached);
   });
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
+  const [syncErrorDetail, setSyncErrorDetail] = useState<string | null>(null);
 
   // Keep localStorage synced whenever state changes
   useEffect(() => {
@@ -74,56 +75,60 @@ export function useClinicalStore() {
   }, [appointments]);
 
   // Fetch initial data from Supabase
-  useEffect(() => {
-    let isMounted = true;
+  const fetchData = useCallback(async () => {
+    setSyncStatus('syncing');
+    setSyncErrorDetail(null);
+    try {
+      const [projectsRes, patientsRes, appointmentsRes] = await Promise.all([
+        supabase.from('projects').select('*'),
+        supabase.from('patients').select('*'),
+        supabase.from('appointments').select('*')
+      ]);
 
-    const fetchData = async () => {
-      setSyncStatus('syncing');
-      try {
-        const [projectsRes, patientsRes, appointmentsRes] = await Promise.all([
-          supabase.from('projects').select('*'),
-          supabase.from('patients').select('*'),
-          supabase.from('appointments').select('*')
-        ]);
+      let hasError = false;
+      let errorMsg = '';
 
-        if (!isMounted) return;
-
-        let hasError = false;
-
-        if (projectsRes.error) {
-          console.error('Error fetching projects from Supabase:', projectsRes.error);
-          hasError = true;
-        } else if (projectsRes.data) {
-          setProjects(projectsRes.data as Project[]);
-        }
-
-        if (patientsRes.error) {
-          console.error('Error fetching patients from Supabase:', patientsRes.error);
-          hasError = true;
-        } else if (patientsRes.data) {
-          setPatients(patientsRes.data as Patient[]);
-        }
-
-        if (appointmentsRes.error) {
-          console.error('Error fetching appointments from Supabase:', appointmentsRes.error);
-          hasError = true;
-        } else if (appointmentsRes.data) {
-          setAppointments(parseAppointments(appointmentsRes.data));
-        }
-
-        setSyncStatus(hasError ? 'error' : 'synced');
-      } catch (error) {
-        console.error('Error connecting to Supabase:', error);
-        if (isMounted) setSyncStatus('error');
+      if (projectsRes.error) {
+        console.error('Error fetching projects from Supabase:', projectsRes.error);
+        errorMsg = projectsRes.error.message || 'Error al cargar proyectos';
+        hasError = true;
+      } else if (projectsRes.data) {
+        setProjects(projectsRes.data as Project[]);
       }
-    };
 
-    fetchData();
+      if (patientsRes.error) {
+        console.error('Error fetching patients from Supabase:', patientsRes.error);
+        errorMsg = errorMsg || patientsRes.error.message || 'Error al cargar pacientes';
+        hasError = true;
+      } else if (patientsRes.data) {
+        setPatients(patientsRes.data as Patient[]);
+      }
 
-    return () => {
-      isMounted = false;
-    };
+      if (appointmentsRes.error) {
+        console.error('Error fetching appointments from Supabase:', appointmentsRes.error);
+        errorMsg = errorMsg || appointmentsRes.error.message || 'Error al cargar citas';
+        hasError = true;
+      } else if (appointmentsRes.data) {
+        setAppointments(parseAppointments(appointmentsRes.data));
+      }
+
+      if (hasError) {
+        setSyncStatus('error');
+        setSyncErrorDetail(errorMsg);
+      } else {
+        setSyncStatus('synced');
+        setSyncErrorDetail(null);
+      }
+    } catch (error: any) {
+      console.error('Error connecting to Supabase:', error);
+      setSyncStatus('error');
+      setSyncErrorDetail(error?.message || 'Error de conexión con la base de datos');
+    }
   }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   // Setup Realtime subscriptions
   useEffect(() => {
@@ -186,12 +191,15 @@ export function useClinicalStore() {
       if (error) {
         console.error('Error adding project to Supabase:', error);
         setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in addProject:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error guardando proyecto');
     }
     return newProject.id;
   };
@@ -205,12 +213,15 @@ export function useClinicalStore() {
       if (error) {
         console.error('Error updating project in Supabase:', error);
         setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in updateProject:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error actualizando proyecto');
     }
   };
 
@@ -221,7 +232,6 @@ export function useClinicalStore() {
     setSyncStatus('syncing');
 
     try {
-      // Clean up child tables to prevent orphans in Supabase
       await supabase.from('appointments').delete().eq('projectId', id);
       await supabase.from('patients').delete().eq('projectId', id);
       const { error } = await supabase.from('projects').delete().eq('id', id);
@@ -229,12 +239,15 @@ export function useClinicalStore() {
       if (error) {
         console.error('Error deleting project from Supabase:', error);
         setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in deleteProject:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error eliminando proyecto');
     }
   };
 
@@ -248,12 +261,15 @@ export function useClinicalStore() {
       if (error) {
         console.error('Error adding patient to Supabase:', error);
         setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in addPatient:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error añadiendo paciente');
     }
   };
 
@@ -272,12 +288,15 @@ export function useClinicalStore() {
       if (error) {
         console.error('Error deleting patient from Supabase:', error);
         setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in deletePatient:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error eliminando paciente');
     }
   };
 
@@ -314,10 +333,8 @@ export function useClinicalStore() {
       }
     }
 
-    // Find patients removed in this edit
     const patientsToDelete = existingProjectPatients.filter(p => !activeIds.has(p.id));
 
-    // Optimistic update
     setPatients([...otherPatients, ...updatedProjectPatients]);
 
     try {
@@ -332,9 +349,11 @@ export function useClinicalStore() {
         await supabase.from('appointments').update({ patientId: null }).in('patientId', idsToDelete);
       }
       setSyncStatus('synced');
-    } catch (err) {
+      setSyncErrorDetail(null);
+    } catch (err: any) {
       console.error('Error in syncProjectPatients:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error sincronizando pacientes');
     }
   };
 
@@ -380,35 +399,29 @@ export function useClinicalStore() {
     setSyncStatus('syncing');
 
     try {
-      const dbAppointments = newAppointments.map(a => ({
-        ...a,
-        date: a.date.toISOString(),
-        recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null,
-      }));
+      // Omit visitPeriod from DB payload since column does not exist in schema
+      const dbAppointments = newAppointments.map(a => {
+        const { visitPeriod, ...clean } = a;
+        return {
+          ...clean,
+          date: a.date.toISOString(),
+          recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null,
+        };
+      });
 
       const { error } = await supabase.from('appointments').insert(dbAppointments);
       if (error) {
-        const fallback = newAppointments.map(a => {
-          const { visitPeriod, ...clean } = a;
-          return {
-            ...clean,
-            date: a.date.toISOString(),
-            recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null,
-          };
-        });
-        const res = await supabase.from('appointments').insert(fallback);
-        if (res.error) {
-          console.error('Error adding appointments fallback:', res.error);
-          setSyncStatus('error');
-        } else {
-          setSyncStatus('synced');
-        }
+        console.error('Error adding appointments:', error);
+        setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in addAppointment:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error guardando cita');
     }
   };
 
@@ -417,28 +430,26 @@ export function useClinicalStore() {
     setSyncStatus('syncing');
 
     try {
+      const { visitPeriod, ...clean } = updatedAppointment;
       const dbAppt = {
-        ...updatedAppointment,
+        ...clean,
         date: updatedAppointment.date.toISOString(),
         recurrenceEndDate: updatedAppointment.recurrenceEndDate ? updatedAppointment.recurrenceEndDate.toISOString() : null,
       };
       
       const { error } = await supabase.from('appointments').update(dbAppt).eq('id', updatedAppointment.id);
       if (error) {
-        const { visitPeriod, ...clean } = dbAppt;
-        const res = await supabase.from('appointments').update(clean).eq('id', updatedAppointment.id);
-        if (res.error) {
-          console.error('Error updating appointment fallback:', res.error);
-          setSyncStatus('error');
-        } else {
-          setSyncStatus('synced');
-        }
+        console.error('Error updating appointment:', error);
+        setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in updateAppointment:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error actualizando cita');
     }
   };
 
@@ -463,12 +474,15 @@ export function useClinicalStore() {
         if (error) {
           console.error('Error deleting appointments:', error);
           setSyncStatus('error');
+          setSyncErrorDetail(error.message);
         } else {
           setSyncStatus('synced');
+          setSyncErrorDetail(null);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error in deleteAppointment:', err);
         setSyncStatus('error');
+        setSyncErrorDetail(err?.message || 'Error eliminando cita');
       }
     }
   };
@@ -520,34 +534,27 @@ export function useClinicalStore() {
     setSyncStatus('syncing');
 
     try {
-      const dbAppointments = newAppointments.map(a => ({
-        ...a,
-        date: a.date.toISOString(),
-        recurrenceEndDate: null,
-      }));
+      const dbAppointments = newAppointments.map(a => {
+        const { visitPeriod, ...clean } = a;
+        return {
+          ...clean,
+          date: a.date.toISOString(),
+          recurrenceEndDate: null,
+        };
+      });
       const { error } = await supabase.from('appointments').insert(dbAppointments);
       if (error) {
-        const fallback = newAppointments.map(a => {
-          const { visitPeriod, ...clean } = a;
-          return {
-            ...clean,
-            date: a.date.toISOString(),
-            recurrenceEndDate: null,
-          };
-        });
-        const res = await supabase.from('appointments').insert(fallback);
-        if (res.error) {
-          console.error('Error adding clinical schedule fallback:', res.error);
-          setSyncStatus('error');
-        } else {
-          setSyncStatus('synced');
-        }
+        console.error('Error adding clinical schedule to Supabase:', error);
+        setSyncStatus('error');
+        setSyncErrorDetail(error.message);
       } else {
         setSyncStatus('synced');
+        setSyncErrorDetail(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error adding clinical schedule to Supabase:', err);
       setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error en protocolo clínico');
     }
   };
 
@@ -556,6 +563,8 @@ export function useClinicalStore() {
     patients,
     appointments,
     syncStatus,
+    syncErrorDetail,
+    retrySync: fetchData,
     addProject,
     updateProject,
     deleteProject,
