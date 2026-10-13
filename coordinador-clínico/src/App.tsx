@@ -8,7 +8,7 @@ import { useClinicalStore } from './store';
 import { Project, Appointment } from './types';
 import { isWithinInterval, startOfDay, addDays, format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { AlertTriangle, Menu, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Menu, RefreshCw, Cloud, CloudUpload, Check } from 'lucide-react';
 
 export default function App() {
   const { 
@@ -18,6 +18,7 @@ export default function App() {
     syncStatus, 
     syncErrorDetail,
     retrySync,
+    syncAllToCloud,
     addProject, 
     updateProject, 
     deletePatient, 
@@ -42,6 +43,15 @@ export default function App() {
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | undefined>(undefined);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  const handleManualSync = async () => {
+    const result = await syncAllToCloud();
+    setSyncFeedback(result.message);
+    setTimeout(() => {
+      setSyncFeedback(null);
+    }, 4500);
+  };
 
   const handleDayClick = (date: Date) => {
     if (projects.length === 0) {
@@ -165,37 +175,49 @@ export default function App() {
               </>
             )}
 
-            {/* Cloud Sync Status Indicator */}
-            {syncStatus === 'synced' && (
-              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60" title="Conectado y sincronizado con Supabase">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span className="hidden sm:inline">Guardado en la nube</span>
-              </span>
-            )}
-            {syncStatus === 'syncing' && (
-              <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200/60" title="Sincronizando cambios con Supabase...">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                <span className="hidden sm:inline">Guardando...</span>
-              </span>
-            )}
-            {syncStatus === 'error' && (
-              <button 
-                type="button"
-                onClick={() => {
-                  if (syncErrorDetail) {
-                    alert(`Diagnóstico de conexión a Supabase:\n\n${syncErrorDetail}\n\nReintentando sincronización ahora...`);
-                  }
-                  retrySync();
-                }}
-                className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shadow-xs" 
-                title={syncErrorDetail ? `Aviso: ${syncErrorDetail}. Pulsa para reintentar.` : "Guardado localmente. Pulsa para reconectar con la nube."}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                <span className="hidden sm:inline">Copia local (offline)</span>
-                <span className="sm:hidden">Offline</span>
-                <RefreshCw size={10} className="ml-1 opacity-70" />
-              </button>
-            )}
+            {/* Botón y estado de Copia Online en la Nube */}
+            <div className="relative ml-2 flex items-center">
+              {syncStatus === 'synced' && (
+                <button
+                  type="button"
+                  onClick={handleManualSync}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300/80 hover:bg-emerald-100 transition-all shadow-xs cursor-pointer"
+                  title="Guardado automáticamente en la nube. Pulsa para forzar guardado en todos los dispositivos."
+                >
+                  <Cloud size={13} className="text-emerald-600 shrink-0" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span className="hidden sm:inline">Copia online activa</span>
+                  <span className="sm:hidden">Online</span>
+                </button>
+              )}
+
+              {syncStatus === 'syncing' && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  <RefreshCw size={11} className="animate-spin text-blue-600 shrink-0" />
+                  <span className="hidden sm:inline">Guardando en la nube...</span>
+                  <span className="sm:hidden">Guardando...</span>
+                </span>
+              )}
+
+              {syncStatus === 'error' && (
+                <button 
+                  type="button"
+                  onClick={handleManualSync}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition-all shadow-xs cursor-pointer animate-pulse" 
+                  title={syncErrorDetail ? `Aviso: ${syncErrorDetail}. Pulsa para sincronizar ahora.` : "Pulsa para subir copia a la nube y sincronizar todos tus dispositivos."}
+                >
+                  <CloudUpload size={13} className="text-amber-700 shrink-0" />
+                  <span>Subir copia a la nube</span>
+                </button>
+              )}
+
+              {syncFeedback && (
+                <div className="absolute left-0 top-full mt-1.5 z-50 bg-gray-900 text-white text-[11px] px-3 py-1.5 rounded-lg shadow-xl whitespace-nowrap flex items-center gap-1.5 border border-gray-700">
+                  <Check size={12} className="text-emerald-400 shrink-0" />
+                  <span>{syncFeedback}</span>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex gap-2">
             <button 

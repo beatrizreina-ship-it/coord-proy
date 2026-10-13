@@ -74,7 +74,20 @@ export function useClinicalStore() {
     saveToLocalStorage(STORAGE_KEYS.APPOINTMENTS, appointments);
   }, [appointments]);
 
-  // Fetch initial data from Supabase
+  // Helper to format appointment for Supabase DB schema
+  const toDbAppointment = (a: Appointment) => {
+    const { visitPeriod, ...clean } = a;
+    return {
+      ...clean,
+      date: new Date(a.date).toISOString(),
+      recurrenceEndDate: a.recurrenceEndDate ? new Date(a.recurrenceEndDate).toISOString() : null,
+      patientId: clean.patientId || null,
+      time: clean.time || null,
+      notes: clean.notes || '',
+    };
+  };
+
+  // Fetch data from Supabase and auto-push any local items that are not in cloud yet
   const fetchData = useCallback(async () => {
     setSyncStatus('syncing');
     setSyncErrorDetail(null);
@@ -92,33 +105,64 @@ export function useClinicalStore() {
         console.error('Error fetching projects from Supabase:', projectsRes.error);
         errorMsg = projectsRes.error.message || 'Error al cargar proyectos';
         hasError = true;
-      } else if (projectsRes.data) {
-        setProjects(projectsRes.data as Project[]);
       }
-
       if (patientsRes.error) {
         console.error('Error fetching patients from Supabase:', patientsRes.error);
         errorMsg = errorMsg || patientsRes.error.message || 'Error al cargar pacientes';
         hasError = true;
-      } else if (patientsRes.data) {
-        setPatients(patientsRes.data as Patient[]);
       }
-
       if (appointmentsRes.error) {
         console.error('Error fetching appointments from Supabase:', appointmentsRes.error);
         errorMsg = errorMsg || appointmentsRes.error.message || 'Error al cargar citas';
         hasError = true;
-      } else if (appointmentsRes.data) {
-        setAppointments(parseAppointments(appointmentsRes.data));
       }
 
       if (hasError) {
         setSyncStatus('error');
         setSyncErrorDetail(errorMsg);
-      } else {
-        setSyncStatus('synced');
-        setSyncErrorDetail(null);
+        return;
       }
+
+      const remoteProjects = (projectsRes.data || []) as Project[];
+      const remotePatients = (patientsRes.data || []) as Patient[];
+      const remoteAppointments = parseAppointments(appointmentsRes.data || []);
+
+      // Check current local cache
+      const cachedProjects = loadFromLocalStorage<Project[]>(STORAGE_KEYS.PROJECTS, []);
+      const cachedPatients = loadFromLocalStorage<Patient[]>(STORAGE_KEYS.PATIENTS, []);
+      const cachedAppointments = parseAppointments(loadFromLocalStorage<any[]>(STORAGE_KEYS.APPOINTMENTS, []));
+
+      // Detect any local items that don't exist yet in Supabase (created offline or before sync)
+      const missingProjects = cachedProjects.filter(lp => !remoteProjects.some(rp => rp.id === lp.id));
+      const missingPatients = cachedPatients.filter(lp => !remotePatients.some(rp => rp.id === lp.id));
+      const missingAppointments = cachedAppointments.filter(la => !remoteAppointments.some(ra => ra.id === la.id));
+
+      // Auto-upload any missing items so that other devices can receive them immediately!
+      if (missingProjects.length > 0) {
+        const { error } = await supabase.from('projects').upsert(missingProjects);
+        if (error) console.warn('Warning auto-pushing missing projects:', error);
+      }
+      if (missingPatients.length > 0) {
+        const { error } = await supabase.from('patients').upsert(missingPatients);
+        if (error) console.warn('Warning auto-pushing missing patients:', error);
+      }
+      if (missingAppointments.length > 0) {
+        const dbAppts = missingAppointments.map(toDbAppointment);
+        const { error } = await supabase.from('appointments').upsert(dbAppts);
+        if (error) console.warn('Warning auto-pushing missing appointments:', error);
+      }
+
+      // Merge remote data with any pending local data
+      const mergedProjects = [...remoteProjects, ...missingProjects];
+      const mergedPatients = [...remotePatients, ...missingPatients];
+      const mergedAppointments = [...remoteAppointments, ...missingAppointments];
+
+      setProjects(mergedProjects);
+      setPatients(mergedPatients);
+      setAppointments(mergedAppointments);
+
+      setSyncStatus('synced');
+      setSyncErrorDetail(null);
     } catch (error: any) {
       console.error('Error connecting to Supabase:', error);
       setSyncStatus('error');
@@ -126,8 +170,60 @@ export function useClinicalStore() {
     }
   }, []);
 
+  // Force push all current data to Supabase to guarantee that other devices have 100% identical data
+  const syncAllToCloud = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    setSyncStatus('syncing');
+    setSyncErrorDetail(null);
+    try {
+      if (projects.length > 0) {
+        const { error: pErr } = await supabase.from('projects').upsert(projects);
+        if (pErr) throw pErr;
+      }
+
+      if (patients.length > 0) {
+        const { error: patErr } = await supabase.from('patients').upsert(patients);
+        if (patErr) throw patErr;
+      }
+
+      if (appointments.length > 0) {
+        const dbAppts = appointments.map(toDbAppointment);
+        const { error: aErr } = await supabase.from('appointments').upsert(dbAppts);
+        if (aErr) throw aErr;
+      }
+
+      await fetchData();
+      setSyncStatus('synced');
+      setSyncErrorDetail(null);
+      return { success: true, message: '¡Información guardada en la nube con éxito! Ya está disponible en cualquier otro ordenador o dispositivo.' };
+    } catch (err: any) {
+      console.error('Error in syncAllToCloud:', err);
+      setSyncStatus('error');
+      setSyncErrorDetail(err?.message || 'Error al guardar en la nube');
+      return { success: false, message: err?.message || 'No se pudo completar la sincronización con la nube.' };
+    }
+  }, [projects, patients, appointments, fetchData]);
+
   useEffect(() => {
     fetchData();
+  }, [fetchData]);
+
+  // Auto-sync when window gains focus or network recovers + periodic gentle refresh for cross-device sync
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchData();
+    };
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleFocus);
+
+    const interval = setInterval(() => {
+      fetchData();
+    }, 45000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleFocus);
+      clearInterval(interval);
+    };
   }, [fetchData]);
 
   // Setup Realtime subscriptions
@@ -565,6 +661,7 @@ export function useClinicalStore() {
     syncStatus,
     syncErrorDetail,
     retrySync: fetchData,
+    syncAllToCloud,
     addProject,
     updateProject,
     deleteProject,
