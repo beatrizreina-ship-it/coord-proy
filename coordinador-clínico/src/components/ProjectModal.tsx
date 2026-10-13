@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 import { Project, Patient } from '../types';
 
 interface ProjectModalProps {
   onClose: () => void;
   onSave: (project: Omit<Project, 'id'> | Project, patients: {id?: string, name: string, color?: string}[]) => void;
+  onDelete?: (id: string) => void;
   initialData?: Project;
   initialPatients?: Patient[];
 }
@@ -18,7 +19,7 @@ const PASTEL_COLORS = [
   'bg-[#F3F4F6]'
 ];
 
-export function ProjectModal({ onClose, onSave, initialData, initialPatients }: ProjectModalProps) {
+export function ProjectModal({ onClose, onSave, onDelete, initialData, initialPatients }: ProjectModalProps) {
   const [name, setName] = useState(initialData?.name || '');
   const [observations, setObservations] = useState(initialData?.observations || '');
   const [startDate, setStartDate] = useState(initialData?.startDate || '');
@@ -51,6 +52,25 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
     const newList = [...patientsList];
     newList[index] = { ...newList[index], color: newColor };
     setPatientsList(newList);
+  };
+
+  const handleDelete = () => {
+    if (!initialData || !onDelete) return;
+
+    // Primera confirmación
+    const firstConfirm = window.confirm(
+      `¿Deseas eliminar el proyecto "${initialData.name}"? Se eliminarán también todas sus citas y pacientes asociados.`
+    );
+    if (!firstConfirm) return;
+
+    // Doble pregunta requerida por el usuario
+    const secondConfirm = window.confirm(
+      `¿Estás segura de querer borrar el proyecto "${initialData.name}"?`
+    );
+    if (!secondConfirm) return;
+
+    onDelete(initialData.id);
+    onClose();
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -157,7 +177,19 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
             />
           </div>
 
-          <div className="mt-4 flex items-center justify-end">
+          <div className="mt-4 flex items-center justify-between">
+            <div>
+              {initialData && onDelete && (
+                <button 
+                  type="button" 
+                  onClick={handleDelete}
+                  className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 size={15} />
+                  Borrar Proyecto
+                </button>
+              )}
+            </div>
             <div className="flex gap-3">
               <button 
                 type="button" 
@@ -168,7 +200,7 @@ export function ProjectModal({ onClose, onSave, initialData, initialPatients }: 
               </button>
               <button 
                 type="submit"
-                className="bg-[#B5D8EB] text-[#1E3A4C] px-6 py-2 rounded-lg text-xs font-bold hover:shadow-md transition-shadow"
+                className="bg-[#007B83] text-white px-6 py-2 rounded-lg text-xs font-bold hover:bg-[#00666D] transition-colors shadow-sm"
               >
                 Guardar Proyecto
               </button>

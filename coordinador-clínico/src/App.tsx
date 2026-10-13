@@ -8,7 +8,7 @@ import { useClinicalStore } from './store';
 import { Project, Appointment } from './types';
 import { isWithinInterval, startOfDay, addDays, format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { AlertTriangle, Menu, RefreshCw, Cloud, CloudUpload, Check } from 'lucide-react';
+import { AlertTriangle, Menu, RefreshCw, Cloud, CloudUpload, Check, Trash2 } from 'lucide-react';
 
 export default function App() {
   const { 
@@ -21,6 +21,7 @@ export default function App() {
     syncAllToCloud,
     addProject, 
     updateProject, 
+    deleteProject,
     deletePatient, 
     syncProjectPatients, 
     addAppointment, 
@@ -76,6 +77,29 @@ export default function App() {
   const handleCloseProjectModal = () => {
     setIsProjectModalOpen(false);
     setEditingProject(undefined);
+  };
+
+  const handleDeleteProject = (projectId: string) => {
+    const project = projects.find(p => p.id === projectId);
+    const projectName = project ? ` "${project.name}"` : '';
+
+    // Primera confirmación
+    const firstConfirm = window.confirm(
+      `¿Deseas eliminar el proyecto${projectName}? Se borrarán también todas sus citas y pacientes asociados.`
+    );
+    if (!firstConfirm) return;
+
+    // Doble pregunta requerida por el usuario
+    const secondConfirm = window.confirm(
+      `¿Estás segura de querer borrar el proyecto${projectName}?`
+    );
+    if (!secondConfirm) return;
+
+    deleteProject(projectId);
+    if (selectedProjectId === projectId) {
+      setSelectedProjectId(null);
+      setSelectedPatientId(null);
+    }
   };
 
   const handleSaveProject = async (projectData: Omit<Project, 'id'> | Project, projectPatients: {id?: string, name: string, color?: string}[]) => {
@@ -240,6 +264,24 @@ export default function App() {
               <span className="hidden sm:inline">Editar Proyecto</span>
               <span className="sm:hidden">Editar</span>
             </button>
+            <button 
+              onClick={() => {
+                if (selectedProjectId) {
+                  handleDeleteProject(selectedProjectId);
+                }
+              }}
+              disabled={!selectedProjectId}
+              className={`px-3 md:px-4 py-1.5 rounded-md text-xs font-semibold shadow-xs transition-colors border whitespace-nowrap flex items-center gap-1.5 ${
+                selectedProjectId 
+                  ? 'bg-white border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300' 
+                  : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title={selectedProjectId ? "Borrar proyecto seleccionado" : "Selecciona un proyecto para borrarlo"}
+            >
+              <Trash2 size={13} className={selectedProjectId ? "text-red-500" : "text-gray-300"} />
+              <span className="hidden sm:inline">Borrar Proyecto</span>
+              <span className="sm:hidden">Borrar</span>
+            </button>
           </div>
         </header>
         
@@ -259,6 +301,7 @@ export default function App() {
         <ProjectModal 
           onClose={handleCloseProjectModal}
           onSave={handleSaveProject}
+          onDelete={handleDeleteProject}
           initialData={editingProject}
           initialPatients={editingProject ? patients.filter(p => p.projectId === editingProject.id) : undefined}
         />
