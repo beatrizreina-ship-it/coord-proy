@@ -495,17 +495,8 @@ export function useClinicalStore() {
     setSyncStatus('syncing');
 
     try {
-      // Omit visitPeriod from DB payload since column does not exist in schema
-      const dbAppointments = newAppointments.map(a => {
-        const { visitPeriod, ...clean } = a;
-        return {
-          ...clean,
-          date: a.date.toISOString(),
-          recurrenceEndDate: a.recurrenceEndDate ? a.recurrenceEndDate.toISOString() : null,
-        };
-      });
-
-      const { error } = await supabase.from('appointments').insert(dbAppointments);
+      const dbAppointments = newAppointments.map(toDbAppointment);
+      const { error } = await supabase.from('appointments').upsert(dbAppointments);
       if (error) {
         console.error('Error adding appointments:', error);
         setSyncStatus('error');
@@ -526,14 +517,8 @@ export function useClinicalStore() {
     setSyncStatus('syncing');
 
     try {
-      const { visitPeriod, ...clean } = updatedAppointment;
-      const dbAppt = {
-        ...clean,
-        date: updatedAppointment.date.toISOString(),
-        recurrenceEndDate: updatedAppointment.recurrenceEndDate ? updatedAppointment.recurrenceEndDate.toISOString() : null,
-      };
-      
-      const { error } = await supabase.from('appointments').update(dbAppt).eq('id', updatedAppointment.id);
+      const dbAppt = toDbAppointment(updatedAppointment);
+      const { error } = await supabase.from('appointments').upsert(dbAppt);
       if (error) {
         console.error('Error updating appointment:', error);
         setSyncStatus('error');
@@ -630,15 +615,8 @@ export function useClinicalStore() {
     setSyncStatus('syncing');
 
     try {
-      const dbAppointments = newAppointments.map(a => {
-        const { visitPeriod, ...clean } = a;
-        return {
-          ...clean,
-          date: a.date.toISOString(),
-          recurrenceEndDate: null,
-        };
-      });
-      const { error } = await supabase.from('appointments').insert(dbAppointments);
+      const dbAppointments = newAppointments.map(toDbAppointment);
+      const { error } = await supabase.from('appointments').upsert(dbAppointments);
       if (error) {
         console.error('Error adding clinical schedule to Supabase:', error);
         setSyncStatus('error');
